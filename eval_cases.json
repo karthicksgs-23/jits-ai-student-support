@@ -1,0 +1,45 @@
+[
+  {
+    "question": "What are the attendance requirements for B.Tech students?",
+    "expected_route": "agent_1",
+    "expected_keywords": [
+      "75%",
+      "65%",
+      "condoned",
+      "attendance"
+    ]
+  },
+  {
+    "question": "What courses are offered at JITS?",
+    "expected_route": "agent_2",
+    "expected_keywords": [
+      "Computer Science",
+      "Electronics",
+      "Mechanical"
+    ]
+  },
+  {
+    "question": "What happens if attendance is below 65%?",
+    "expected_route": "agent_1",
+    "expected_keywords": [
+      "cannot be condoned",
+      "semester-end",
+      "detained"
+    ]
+  },
+  {
+    "question": "What is the promotion rule for B.Tech students?",
+    "expected_route": "agent_1",
+    "expected_keywords": [
+      "promotion",
+      "attendance"
+    ]
+  },
+  {
+    "question": "Where can I find JITS contact information?",
+    "expected_route": "agent_1",
+    "expected_keywords": [
+      "JITS"
+    ]
+  }
+]

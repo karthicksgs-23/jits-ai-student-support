@@ -1,0 +1,43 @@
+# Environment variables / secrets
+.env
+.env.*
+!.env.example
+
+# Python virtual environments
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# IDE
+.vscode/
+.idea/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Logs
+logs/
+*.log
+
+# Evaluation output
+eval_results.json
+
+# Local/generated model caches
+.cache/
+huggingface/
+sentence_transformers/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Scrapling source archive / local checkout
+Scrapling-main.zip
+scrapling_src/
+
+# Large/generated PDF backup
+data/academic_regulations.pdf
