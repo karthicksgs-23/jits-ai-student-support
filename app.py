@@ -19,8 +19,17 @@ from conversation_manager import contextualize_question
 # ENVIRONMENT
 # =========================================================
 
-load_dotenv()
+# =========================================================
+# ENVIRONMENT
+# =========================================================
 
+try:
+    load_dotenv()
+
+except (OSError, UnicodeError) as error:
+    raise RuntimeError(
+        "Failed to load environment configuration."
+    ) from error
 
 # =========================================================
 # CONSTANTS
@@ -755,4 +764,4 @@ def start_chat():
 
 if __name__ == "__main__":
 
-    start_chat()
+    start_chat()python evals.py
