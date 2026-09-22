@@ -25,21 +25,14 @@ load_dotenv()
 # PATHS
 # =========================================================
 
-EVAL_FILE = Path(
-    "eval_cases.json"
-)
+EVAL_FILE = Path("eval_cases.json")
 
-RESULT_FILE = Path(
-    "eval_results.json"
-)
+RESULT_FILE = Path("eval_results.json")
 
-LOG_DIR = Path(
-    "logs"
-)
+LOG_DIR = Path("logs")
 
-EVAL_HISTORY_DIR = (
-    LOG_DIR / "eval_runs"
-)
+EVAL_HISTORY_DIR = LOG_DIR / "eval_runs"
+
 
 LOG_DIR.mkdir(
     parents=True,
@@ -56,17 +49,13 @@ EVAL_HISTORY_DIR.mkdir(
 # CONSTANTS
 # =========================================================
 
-RAG_NOT_SUFFICIENT = (
-    "RAG_NOT_SUFFICIENT"
-)
+RAG_NOT_SUFFICIENT = "RAG_NOT_SUFFICIENT"
 
-SELF_RAG_INSUFFICIENT = (
-    "SELF_RAG_INSUFFICIENT"
-)
+SELF_RAG_INSUFFICIENT = "SELF_RAG_INSUFFICIENT"
 
-WEBSITE_NOT_SUFFICIENT = (
-    "WEBSITE_NOT_SUFFICIENT"
-)
+WEBSITE_NOT_SUFFICIENT = "WEBSITE_NOT_SUFFICIENT"
+
+WEBSITE_SEARCH_NO_RESULTS = "WEBSITE_SEARCH_NO_RESULTS"
 
 
 # =========================================================
@@ -96,13 +85,9 @@ if not logger.handlers:
     # -----------------------------------------------------
 
     file_handler = RotatingFileHandler(
-
         LOG_DIR / "evals.log",
-
         maxBytes=2_000_000,
-
         backupCount=5,
-
         encoding="utf-8"
     )
 
@@ -115,9 +100,7 @@ if not logger.handlers:
     # TERMINAL LOGGER
     # -----------------------------------------------------
 
-    console_handler = (
-        logging.StreamHandler()
-    )
+    console_handler = logging.StreamHandler()
 
     console_handler.setFormatter(
         formatter
@@ -134,7 +117,131 @@ if not logger.handlers:
 
 
 # =========================================================
-# RUN ONE CASE
+# KEYWORD / PHRASE MATCHING
+# =========================================================
+
+def evaluate_expected_keywords(
+    answer: str,
+    expected_keywords: list
+):
+    """
+    Evaluate expected answer content.
+
+    Each expected item can be:
+
+    1. A string:
+       "attendance"
+
+       The exact phrase must appear.
+
+    2. A list of acceptable alternatives:
+       [
+           "not condoned",
+           "cannot be condoned"
+       ]
+
+       At least one phrase must appear.
+
+    Returns:
+        found_keywords,
+        missing_keywords,
+        keyword_pass
+    """
+
+    answer_lower = (
+        answer.lower()
+        if answer
+        else ""
+    )
+
+    found_keywords = []
+
+    missing_keywords = []
+
+
+    for expected in expected_keywords:
+
+        # =================================================
+        # ALTERNATIVE VALID PHRASES
+        # =================================================
+
+        if isinstance(expected, list):
+
+            matched_phrase = next(
+                (
+                    phrase
+                    for phrase in expected
+                    if isinstance(phrase, str)
+                    and phrase.lower() in answer_lower
+                ),
+                None
+            )
+
+
+            if matched_phrase:
+
+                found_keywords.append(
+                    matched_phrase
+                )
+
+            else:
+
+                readable_requirement = (
+                    " OR ".join(
+                        str(item)
+                        for item in expected
+                    )
+                )
+
+                missing_keywords.append(
+                    readable_requirement
+                )
+
+
+        # =================================================
+        # NORMAL REQUIRED PHRASE
+        # =================================================
+
+        elif isinstance(expected, str):
+
+            if expected.lower() in answer_lower:
+
+                found_keywords.append(
+                    expected
+                )
+
+            else:
+
+                missing_keywords.append(
+                    expected
+                )
+
+
+        # =================================================
+        # INVALID EVAL CONFIGURATION
+        # =================================================
+
+        else:
+
+            missing_keywords.append(
+                f"INVALID_EXPECTATION:{expected}"
+            )
+
+
+    keyword_pass = (
+        len(missing_keywords) == 0
+    )
+
+
+    return (
+        found_keywords,
+        missing_keywords,
+        keyword_pass
+    )
+
+
+# =========================================================
+# RUN ONE EVALUATION CASE
 # =========================================================
 
 def run_eval_case(
@@ -143,7 +250,14 @@ def run_eval_case(
     total_cases: int = 1
 ):
     """
-    Execute one evaluation case and return a detailed result.
+    Execute one evaluation case.
+
+    Evaluates:
+
+    - routing
+    - expected answer phrases
+    - agent execution failures
+    - execution time
     """
 
     started_at = (
@@ -154,26 +268,26 @@ def run_eval_case(
         )
     )
 
-    start_time = (
-        time.perf_counter()
+    start_time = time.perf_counter()
+
+
+    # =====================================================
+    # READ CASE
+    # =====================================================
+
+    question = case["question"]
+
+    expected_route = case["expected_route"]
+
+    expected_keywords = case.get(
+        "expected_keywords",
+        []
     )
 
 
-    question = (
-        case["question"]
-    )
-
-    expected_route = (
-        case["expected_route"]
-    )
-
-    expected_keywords = (
-        case.get(
-            "expected_keywords",
-            []
-        )
-    )
-
+    # =====================================================
+    # LOG CASE START
+    # =====================================================
 
     logger.info(
         "=" * 70
@@ -202,14 +316,18 @@ def run_eval_case(
 
 
     # =====================================================
-    # DEFAULT RESULT VALUES
+    # DEFAULT VALUES
     # =====================================================
 
     actual_route = None
 
     answer = ""
 
+    rag_answer = None
+
     execution_error = None
+
+    fallback_reason = None
 
 
     # =====================================================
@@ -222,10 +340,9 @@ def run_eval_case(
             "Running Agent 1..."
         )
 
-        rag_answer = (
-            run_rag_agent(
-                question
-            )
+
+        rag_answer = run_rag_agent(
+            question
         )
 
 
@@ -236,9 +353,7 @@ def run_eval_case(
             )
 
 
-        rag_answer = (
-            rag_answer.strip()
-        )
+        rag_answer = rag_answer.strip()
 
 
         if not rag_answer:
@@ -259,46 +374,62 @@ def run_eval_case(
             "Agent 1 execution failed."
         )
 
+
         rag_answer = None
 
         execution_error = (
             f"Agent 1 error: {error}"
         )
 
-
-    # =====================================================
-    # ROUTING
-    # =====================================================
-
-    needs_agent_2 = (
-
-        rag_answer is None
-
-        or (
-            rag_answer
-            and rag_answer.upper()
-            in {
-                RAG_NOT_SUFFICIENT,
-                SELF_RAG_INSUFFICIENT
-            }
+        fallback_reason = (
+            "Agent 1 technical failure"
         )
-    )
 
 
     # =====================================================
-    # AGENT 2
+    # ROUTING DECISION
+    # =====================================================
+
+    needs_agent_2 = False
+
+
+    if rag_answer is None:
+
+        needs_agent_2 = True
+
+
+    elif rag_answer.upper() in {
+        RAG_NOT_SUFFICIENT,
+        SELF_RAG_INSUFFICIENT
+    }:
+
+        needs_agent_2 = True
+
+        fallback_reason = (
+            "Agent 1 evidence insufficient"
+        )
+
+
+    # =====================================================
+    # AGENT 2 FALLBACK
     # =====================================================
 
     if needs_agent_2:
 
-        actual_route = (
-            "agent_2"
-        )
+        actual_route = "agent_2"
 
 
         logger.info(
             "Routing decision: Agent 2"
         )
+
+
+        if fallback_reason:
+
+            logger.info(
+                "Fallback reason: %s",
+                fallback_reason
+            )
 
 
         try:
@@ -308,10 +439,8 @@ def run_eval_case(
             )
 
 
-            answer = (
-                run_website_agent(
-                    question
-                )
+            answer = run_website_agent(
+                question
             )
 
 
@@ -322,9 +451,7 @@ def run_eval_case(
                 )
 
 
-            answer = (
-                answer.strip()
-            )
+            answer = answer.strip()
 
 
             if not answer:
@@ -345,7 +472,9 @@ def run_eval_case(
                 "Agent 2 execution failed."
             )
 
+
             answer = ""
+
 
             if execution_error:
 
@@ -366,18 +495,49 @@ def run_eval_case(
 
     else:
 
-        actual_route = (
-            "agent_1"
-        )
+        actual_route = "agent_1"
 
-        answer = (
-            rag_answer
-        )
+        answer = rag_answer
 
 
         logger.info(
             "Routing decision: Agent 1"
         )
+
+
+    # =====================================================
+    # DETECT INTERNAL FAILURE MARKERS
+    # =====================================================
+
+    internal_answer_marker = None
+
+
+    if answer:
+
+        answer_upper = answer.upper()
+
+
+        if answer_upper == WEBSITE_NOT_SUFFICIENT:
+
+            internal_answer_marker = (
+                WEBSITE_NOT_SUFFICIENT
+            )
+
+
+        elif answer_upper == WEBSITE_SEARCH_NO_RESULTS:
+
+            internal_answer_marker = (
+                WEBSITE_SEARCH_NO_RESULTS
+            )
+
+
+        elif answer_upper.startswith(
+            "SERPER_ERROR"
+        ):
+
+            internal_answer_marker = (
+                answer
+            )
 
 
     # =====================================================
@@ -391,47 +551,23 @@ def run_eval_case(
 
 
     # =====================================================
-    # KEYWORD EVALUATION
+    # KEYWORD / MEANING EVALUATION
     # =====================================================
 
-    answer_lower = (
-        answer.lower()
-    )
+    (
+        found_keywords,
+        missing_keywords,
+        keyword_pass
+    ) = evaluate_expected_keywords(
 
+        answer=answer,
 
-    found_keywords = []
-
-    missing_keywords = []
-
-
-    for keyword in expected_keywords:
-
-        if (
-            keyword.lower()
-            in answer_lower
-        ):
-
-            found_keywords.append(
-                keyword
-            )
-
-        else:
-
-            missing_keywords.append(
-                keyword
-            )
-
-
-    keyword_pass = (
-        len(
-            missing_keywords
-        )
-        == 0
+        expected_keywords=expected_keywords
     )
 
 
     # =====================================================
-    # OVERALL PASS
+    # OVERALL RESULT
     # =====================================================
 
     overall_pass = (
@@ -441,6 +577,8 @@ def run_eval_case(
         and keyword_pass
 
         and execution_error is None
+
+        and internal_answer_marker is None
     )
 
 
@@ -464,6 +602,7 @@ def run_eval_case(
         actual_route
     )
 
+
     logger.info(
         "Route result: %s",
         (
@@ -479,10 +618,12 @@ def run_eval_case(
         found_keywords
     )
 
+
     logger.info(
         "Missing keywords: %s",
         missing_keywords
     )
+
 
     logger.info(
         "Keyword result: %s",
@@ -504,6 +645,22 @@ def run_eval_case(
         "Answer:\n%s",
         answer
     )
+
+
+    if fallback_reason:
+
+        logger.info(
+            "Fallback reason: %s",
+            fallback_reason
+        )
+
+
+    if internal_answer_marker:
+
+        logger.warning(
+            "Internal failure marker returned: %s",
+            internal_answer_marker
+        )
 
 
     if execution_error:
@@ -531,7 +688,7 @@ def run_eval_case(
 
 
     # =====================================================
-    # RESULT
+    # RETURN RESULT
     # =====================================================
 
     return {
@@ -563,6 +720,12 @@ def run_eval_case(
         "keyword_pass":
             keyword_pass,
 
+        "fallback_reason":
+            fallback_reason,
+
+        "internal_answer_marker":
+            internal_answer_marker,
+
         "execution_error":
             execution_error,
 
@@ -578,14 +741,97 @@ def run_eval_case(
 
 
 # =========================================================
+# VALIDATE EVALUATION DATA
+# =========================================================
+
+def validate_eval_cases(
+    cases
+):
+    """
+    Validate eval_cases.json before running expensive tests.
+    """
+
+    if not isinstance(
+        cases,
+        list
+    ):
+
+        raise ValueError(
+            "eval_cases.json must contain a JSON list."
+        )
+
+
+    if not cases:
+
+        raise ValueError(
+            "eval_cases.json contains no evaluation cases."
+        )
+
+
+    for index, case in enumerate(
+        cases,
+        start=1
+    ):
+
+        if not isinstance(
+            case,
+            dict
+        ):
+
+            raise ValueError(
+                f"Evaluation case {index} must be an object."
+            )
+
+
+        if not case.get(
+            "question"
+        ):
+
+            raise ValueError(
+                f"Evaluation case {index} has no question."
+            )
+
+
+        expected_route = case.get(
+            "expected_route"
+        )
+
+
+        if expected_route not in {
+            "agent_1",
+            "agent_2"
+        }:
+
+            raise ValueError(
+                f"Evaluation case {index} has invalid "
+                f"expected_route: {expected_route}"
+            )
+
+
+        expected_keywords = case.get(
+            "expected_keywords",
+            []
+        )
+
+
+        if not isinstance(
+            expected_keywords,
+            list
+        ):
+
+            raise ValueError(
+                f"Evaluation case {index}: "
+                "expected_keywords must be a list."
+            )
+
+
+# =========================================================
 # RUN ALL EVALUATIONS
 # =========================================================
 
 def run_evaluations():
 
-    logger.info(
-        ""
-    )
+    logger.info("")
 
     logger.info(
         "#" * 70
@@ -607,7 +853,7 @@ def run_evaluations():
 
 
     # =====================================================
-    # LOAD CASES
+    # LOAD EVALUATION CASES
     # =====================================================
 
     if not EVAL_FILE.exists():
@@ -625,6 +871,7 @@ def run_evaluations():
             )
         )
 
+
     except json.JSONDecodeError:
 
         logger.exception(
@@ -634,14 +881,13 @@ def run_evaluations():
         raise
 
 
-    if not isinstance(
-        cases,
-        list
-    ):
+    # =====================================================
+    # VALIDATE EVALUATION CASES
+    # =====================================================
 
-        raise ValueError(
-            "eval_cases.json must contain a JSON list."
-        )
+    validate_eval_cases(
+        cases
+    )
 
 
     logger.info(
@@ -678,7 +924,7 @@ def run_evaluations():
 
 
     # =====================================================
-    # SUMMARY
+    # SUMMARY CALCULATIONS
     # =====================================================
 
     total = len(results)
@@ -707,6 +953,13 @@ def run_evaluations():
         1
         for item in results
         if item["keyword_pass"]
+    )
+
+
+    execution_errors = sum(
+        1
+        for item in results
+        if item["execution_error"]
     )
 
 
@@ -740,6 +993,22 @@ def run_evaluations():
     )
 
 
+    average_duration = round(
+        (
+            sum(
+                item["elapsed_seconds"]
+                for item in results
+            )
+            / total
+        ),
+        3
+    ) if total else 0
+
+
+    # =====================================================
+    # SUMMARY OBJECT
+    # =====================================================
+
     summary = {
 
         "total_tests":
@@ -750,6 +1019,9 @@ def run_evaluations():
 
         "failed":
             failed,
+
+        "execution_errors":
+            execution_errors,
 
         "routing_accuracy":
             round(
@@ -770,7 +1042,10 @@ def run_evaluations():
             ),
 
         "total_duration_seconds":
-            total_duration
+            total_duration,
+
+        "average_case_duration_seconds":
+            average_duration
     }
 
 
@@ -778,9 +1053,7 @@ def run_evaluations():
     # LOG SUMMARY
     # =====================================================
 
-    logger.info(
-        ""
-    )
+    logger.info("")
 
     logger.info(
         "=" * 70
@@ -794,35 +1067,54 @@ def run_evaluations():
         "=" * 70
     )
 
+
     logger.info(
         "Total tests: %d",
         total
     )
+
 
     logger.info(
         "Passed: %d",
         passed
     )
 
+
     logger.info(
         "Failed: %d",
         failed
     )
+
+
+    logger.info(
+        "Execution Errors: %d",
+        execution_errors
+    )
+
 
     logger.info(
         "Routing Accuracy: %.2f%%",
         routing_accuracy
     )
 
+
     logger.info(
         "Keyword Accuracy: %.2f%%",
         keyword_accuracy
     )
 
+
     logger.info(
         "Overall Eval Pass Rate: %.2f%%",
         overall_pass_rate
     )
+
+
+    logger.info(
+        "Average Case Duration: %.3f seconds",
+        average_duration
+    )
+
 
     logger.info(
         "Total Duration: %.3f seconds",
@@ -840,17 +1132,13 @@ def run_evaluations():
 
         for item in results
 
-        if not item[
-            "overall_pass"
-        ]
+        if not item["overall_pass"]
     ]
 
 
     if failed_results:
 
-        logger.warning(
-            ""
-        )
+        logger.warning("")
 
         logger.warning(
             "FAILED CASES"
@@ -864,13 +1152,40 @@ def run_evaluations():
                 item["question"]
             )
 
+
             logger.warning(
-                "Expected=%s | Actual=%s | "
-                "Missing=%s | Error=%s",
-                item["expected_route"],
-                item["actual_route"],
-                item["missing_keywords"],
+                "Expected route: %s",
+                item["expected_route"]
+            )
+
+
+            logger.warning(
+                "Actual route: %s",
+                item["actual_route"]
+            )
+
+
+            logger.warning(
+                "Route pass: %s",
+                item["route_pass"]
+            )
+
+
+            logger.warning(
+                "Missing keywords: %s",
+                item["missing_keywords"]
+            )
+
+
+            logger.warning(
+                "Execution error: %s",
                 item["execution_error"]
+            )
+
+
+            logger.warning(
+                "Answer: %s",
+                item["answer"]
             )
 
 
@@ -900,9 +1215,9 @@ def run_evaluations():
     }
 
 
-    # -----------------------------------------------------
-    # LATEST RESULTS
-    # -----------------------------------------------------
+    # =====================================================
+    # SAVE LATEST RESULT
+    # =====================================================
 
     RESULT_FILE.write_text(
 
@@ -916,9 +1231,9 @@ def run_evaluations():
     )
 
 
-    # -----------------------------------------------------
-    # HISTORICAL RUN
-    # -----------------------------------------------------
+    # =====================================================
+    # SAVE HISTORICAL RESULT
+    # =====================================================
 
     history_file = (
 
@@ -945,6 +1260,7 @@ def run_evaluations():
         RESULT_FILE
     )
 
+
     logger.info(
         "Historical results saved: %s",
         history_file
@@ -963,6 +1279,14 @@ if __name__ == "__main__":
     try:
 
         run_evaluations()
+
+
+    except KeyboardInterrupt:
+
+        logger.warning(
+            "Evaluation run stopped by user."
+        )
+
 
     except Exception:
 

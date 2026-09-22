@@ -12,12 +12,33 @@ from agents.support_agents import (
 
 from guardrails import validate_user_query
 from output_guardrails import validate_agent_answer
-from conversation_manager import contextualize_question
-
 
 # =========================================================
-# ENVIRONMENT
+# CONVERSATION MANAGER IMPORT WITH FALLBACK
 # =========================================================
+
+try:
+    from conversation_manager import contextualize_question
+
+except ImportError as error:
+
+    logging.getLogger(__name__).warning(
+        "Conversation manager could not be imported: %s. "
+        "Falling back to the original student question.",
+        error
+    )
+
+    def contextualize_question(
+        question: str,
+        conversation_history: list
+    ) -> str:
+        """
+        Fallback used when the conversation manager
+        cannot be imported.
+        """
+        return question.strip()
+
+
 
 # =========================================================
 # ENVIRONMENT
@@ -764,4 +785,4 @@ def start_chat():
 
 if __name__ == "__main__":
 
-    start_chat()python evals.py
+    start_chat()

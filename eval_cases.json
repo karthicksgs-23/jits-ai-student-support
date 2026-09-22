@@ -19,15 +19,18 @@
     ]
   },
   {
-    "question": "What happens if attendance is below 65%?",
-    "expected_route": "agent_1",
-    "expected_keywords": [
-      "below 65%",
+  "question": "What happens if attendance is below 65%?",
+  "expected_route": "agent_1",
+  "expected_keywords": [
+    "below 65%",
+    [
       "not condoned",
-      "semester-end",
-      "detained"
-    ]
-  },
+      "cannot be condoned"
+    ],
+    "semester-end",
+    "detained"
+  ]
+},
   {
     "question": "What is the promotion rule for B.Tech students?",
     "expected_route": "agent_1",
