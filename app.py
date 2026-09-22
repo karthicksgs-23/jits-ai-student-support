@@ -23,318 +23,130 @@ load_dotenv()
 
 
 # =========================================================
-# SYSTEM LOGGING
+# CONSTANTS
+# =========================================================
+
+RAG_NOT_SUFFICIENT = "RAG_NOT_SUFFICIENT"
+SELF_RAG_INSUFFICIENT = "SELF_RAG_INSUFFICIENT"
+WEBSITE_NOT_SUFFICIENT = "WEBSITE_NOT_SUFFICIENT"
+
+SYSTEM_ERROR_MESSAGE = (
+    "I'm temporarily unable to process that request. "
+    "Please try again shortly."
+)
+
+NO_INFORMATION_MESSAGE = (
+    "I could not find sufficient information in the "
+    "JITS Academic Regulations or the official JITS website "
+    "to answer that accurately."
+)
+
+BLOCKED_OUTPUT_MESSAGE = (
+    "I could not provide a reliable answer for that question. "
+    "Please try rephrasing it."
+)
+
+REJECTED_INPUT_MESSAGE = (
+    "I can help with JITS-related student questions. "
+    "Please rephrase your request."
+)
+
+
+# =========================================================
+# SYSTEM ERROR LOGGER
 # =========================================================
 
 LOG_DIR = Path("logs")
-LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-system_logger = logging.getLogger(
+LOG_DIR.mkdir(
+    parents=True,
+    exist_ok=True
+)
+
+logger = logging.getLogger(
     "jits_student_support"
 )
 
-system_logger.setLevel(
+logger.setLevel(
     logging.INFO
 )
 
+logger.propagate = False
 
-if not system_logger.handlers:
 
-    try:
+if not logger.handlers:
 
-        file_handler = RotatingFileHandler(
-            LOG_DIR / "system_errors.log",
-            maxBytes=1_000_000,
-            backupCount=3,
-            encoding="utf-8"
+    file_handler = RotatingFileHandler(
+        LOG_DIR / "system_errors.log",
+        maxBytes=1_000_000,
+        backupCount=3,
+        encoding="utf-8"
+    )
+
+    file_handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s | %(levelname)s | "
+            "%(name)s | %(message)s"
         )
+    )
 
-        formatter = logging.Formatter(
-            "%(asctime)s | %(levelname)s | %(message)s"
-        )
-
-        file_handler.setFormatter(
-            formatter
-        )
-
-        system_logger.addHandler(
-            file_handler
-        )
-
-    except Exception:
-
-        # Logging itself must never crash the app
-        pass
+    logger.addHandler(
+        file_handler
+    )
 
 
 # =========================================================
-# SAFE ERROR LOGGING
+# ERROR LOGGING
 # =========================================================
 
-def log_system_error(
+def log_backend_error(
     stage: str,
     error: Exception
 ):
     """
-    Record backend failures without exposing technical
-    details to the student.
+    Store technical details in the backend log.
+
+    Technical errors are never shown directly to students.
     """
 
-    try:
-
-        system_logger.exception(
-            f"Failure at stage '{stage}': {error}"
-        )
-
-    except Exception:
-
-        pass
+    logger.exception(
+        "Stage failed: %s | %s",
+        stage,
+        error
+    )
 
 
 # =========================================================
-# SAFE INPUT VALIDATION
+# RESULT BUILDER
 # =========================================================
 
-def safe_validate_input(
-    question: str
-):
-    """
-    Run the input guardrail safely.
-
-    Fail closed if the guardrail itself crashes.
-    """
-
-    try:
-
-        return validate_user_query(
-            question
-        )
-
-    except Exception as error:
-
-        log_system_error(
-            "input_guardrail",
-            error
-        )
-
-        return (
-            False,
-            "The request could not be validated."
-        )
-
-
-# =========================================================
-# SAFE OUTPUT VALIDATION
-# =========================================================
-
-def safe_validate_output(
-    answer: str
-):
-    """
-    Run the output guardrail safely.
-
-    Fail closed if validation fails.
-    """
-
-    try:
-
-        return validate_agent_answer(
-            answer
-        )
-
-    except Exception as error:
-
-        log_system_error(
-            "output_guardrail",
-            error
-        )
-
-        return (
-            False,
-            "Output validation failed."
-        )
-
-
-# =========================================================
-# SAFE CONVERSATION CONTEXT
-# =========================================================
-
-def safe_contextualize_question(
-    question: str,
-    conversation_history: list
-):
-    """
-    Convert follow-up questions into standalone questions.
-
-    If the context manager fails, use the student's original
-    question instead of crashing the chat.
-    """
-
-    try:
-
-        standalone_question = (
-            contextualize_question(
-                question=question,
-                conversation_history=conversation_history
-            )
-        )
-
-        if not standalone_question:
-
-            return question.strip()
-
-        return standalone_question.strip()
-
-
-    except Exception as error:
-
-        log_system_error(
-            "conversation_manager",
-            error
-        )
-
-        return question.strip()
-
-
-# =========================================================
-# SAFE AGENT 1
-# =========================================================
-
-def safe_run_rag_agent(
-    question: str
-):
-    """
-    Run Agent 1.
-
-    Returns:
-        (answer, error)
-
-    If Agent 1 fails technically, the controller can still
-    attempt Agent 2.
-    """
-
-    try:
-
-        answer = run_rag_agent(
-            question
-        )
-
-        if answer is None:
-
-            raise ValueError(
-                "Agent 1 returned None."
-            )
-
-        answer = answer.strip()
-
-        if not answer:
-
-            raise ValueError(
-                "Agent 1 returned an empty response."
-            )
-
-        return answer, None
-
-
-    except Exception as error:
-
-        log_system_error(
-            "agent_1",
-            error
-        )
-
-        return None, error
-
-
-# =========================================================
-# SAFE AGENT 2
-# =========================================================
-
-def safe_run_website_agent(
-    question: str
-):
-    """
-    Run Agent 2 website fallback safely.
-    """
-
-    try:
-
-        answer = run_website_agent(
-            question
-        )
-
-        if answer is None:
-
-            raise ValueError(
-                "Agent 2 returned None."
-            )
-
-        answer = answer.strip()
-
-        if not answer:
-
-            raise ValueError(
-                "Agent 2 returned an empty response."
-            )
-
-        return answer, None
-
-
-    except Exception as error:
-
-        log_system_error(
-            "agent_2",
-            error
-        )
-
-        return None, error
-
-
-# =========================================================
-# SAFE LOGGER AGENT
-# =========================================================
-
-def safe_log_interaction(
+def build_result(
     customer_name: str,
     question: str,
+    standalone_question: str,
     answer: str,
-    handled_by: str
+    handled_by: str,
+    status: str,
+    log_result=None
 ):
     """
-    Logging failure must never stop a student from receiving
-    an otherwise valid answer.
+    Return a consistent result structure to the terminal
+    app and Streamlit UI.
     """
 
-    try:
-
-        result = run_logger_agent(
-            customer_name=customer_name,
-            question=question,
-            answer=answer,
-            handled_by=handled_by
-        )
-
-        if result is None:
-
-            return "Logging completed."
-
-        return str(result).strip()
-
-
-    except Exception as error:
-
-        log_system_error(
-            "agent_3_logger",
-            error
-        )
-
-        return (
-            "Interaction logging was unavailable."
-        )
+    return {
+        "customer_name": customer_name,
+        "question": question,
+        "standalone_question": standalone_question,
+        "answer": answer,
+        "handled_by": handled_by,
+        "status": status,
+        "log": log_result
+    }
 
 
 # =========================================================
-# MAIN STUDENT SUPPORT WORKFLOW
+# MAIN SUPPORT WORKFLOW
 # =========================================================
 
 def run_customer_support(
@@ -343,15 +155,32 @@ def run_customer_support(
     original_question: str = None
 ):
     """
-    Main JITS student-support orchestration.
+    Main JITS Student Support controller.
 
-    The student receives a safe response even if one backend
-    component fails.
+    Routing:
+
+        Input Guardrail
+              ↓
+           Agent 1
+              ↓
+       sufficient?
+        /        \
+      yes        no/error
+       │             │
+       │          Agent 2
+       │             │
+       └──────┬──────┘
+              ↓
+       Output Guardrail
+              ↓
+           Agent 3
+              ↓
+          Final answer
     """
 
-    # -----------------------------------------------------
-    # NORMALISE INPUTS
-    # -----------------------------------------------------
+    # =====================================================
+    # NORMALISE INPUT
+    # =====================================================
 
     customer_name = (
         str(customer_name).strip()
@@ -365,263 +194,350 @@ def run_customer_support(
         else ""
     )
 
-
-    if original_question is None:
-
-        original_question = question
-
-    else:
-
-        original_question = (
-            str(original_question).strip()
-        )
+    original_question = (
+        str(original_question).strip()
+        if original_question is not None
+        else question
+    )
 
 
     # =====================================================
     # INPUT GUARDRAIL
     # =====================================================
 
-    allowed, reason = safe_validate_input(
-        original_question
-    )
+    try:
+
+        allowed, reason = validate_user_query(
+            original_question
+        )
+
+    except Exception as error:
+
+        log_backend_error(
+            "input_guardrail",
+            error
+        )
+
+        return build_result(
+            customer_name=customer_name,
+            question=original_question,
+            standalone_question=question,
+            answer=SYSTEM_ERROR_MESSAGE,
+            handled_by="System - Input Guardrail Error",
+            status="error"
+        )
 
 
     if not allowed:
 
-        final_answer = (
-            "I can help with JITS-related student questions. "
-            "Please rephrase your request."
+        logger.warning(
+            "Input rejected by guardrail."
         )
 
-        return {
-            "customer_name": customer_name,
-            "question": original_question,
-            "standalone_question": question,
-            "answer": final_answer,
-            "handled_by": "Input Guardrail",
-            "log": None,
-            "status": "rejected"
-        }
+        return build_result(
+            customer_name=customer_name,
+            question=original_question,
+            standalone_question=question,
+            answer=REJECTED_INPUT_MESSAGE,
+            handled_by="Input Guardrail",
+            status="rejected"
+        )
 
 
     # =====================================================
     # AGENT 1
-    # HYBRID RAG + SELF-RAG
     # =====================================================
 
-    rag_answer, rag_error = (
-        safe_run_rag_agent(
+    rag_answer = None
+    fallback_reason = None
+
+
+    try:
+
+        rag_answer = run_rag_agent(
             question
         )
-    )
+
+        if rag_answer is None:
+
+            raise ValueError(
+                "Agent 1 returned None."
+            )
+
+        rag_answer = rag_answer.strip()
+
+        if not rag_answer:
+
+            raise ValueError(
+                "Agent 1 returned an empty answer."
+            )
+
+
+    except Exception as error:
+
+        log_backend_error(
+            "agent_1",
+            error
+        )
+
+        fallback_reason = (
+            "Agent 1 technical failure"
+        )
 
 
     # =====================================================
-    # DECIDE WHETHER AGENT 2 IS NEEDED
+    # DETERMINE ROUTE
     # =====================================================
 
     use_agent_2 = False
 
 
-    # Agent 1 technical failure
-    if rag_error is not None:
+    if rag_answer is None:
 
         use_agent_2 = True
 
 
-    # Agent 1 intentionally rejected the evidence
-    elif (
-        rag_answer
-        and rag_answer.upper()
-        == "RAG_NOT_SUFFICIENT"
-    ):
+    elif rag_answer.upper() in {
+        RAG_NOT_SUFFICIENT,
+        SELF_RAG_INSUFFICIENT
+    }:
 
         use_agent_2 = True
 
-
-    # =====================================================
-    # AGENT 2 FALLBACK
-    # =====================================================
-
-    if use_agent_2:
-
-        website_answer, website_error = (
-            safe_run_website_agent(
-                question
-            )
+        fallback_reason = (
+            "Academic Regulations evidence insufficient"
         )
-
-
-        # -------------------------------------------------
-        # AGENT 2 TECHNICAL FAILURE
-        # -------------------------------------------------
-
-        if website_error is not None:
-
-            final_answer = (
-                "I'm temporarily unable to retrieve enough "
-                "reliable JITS information for that question. "
-                "Please try again shortly."
-            )
-
-            handled_by = (
-                "Agent 2 - Website Fallback "
-                "(Technical failure)"
-            )
-
-
-        # -------------------------------------------------
-        # AGENT 2 FOUND NO SUFFICIENT EVIDENCE
-        # -------------------------------------------------
-
-        elif (
-            website_answer.upper()
-            == "WEBSITE_NOT_SUFFICIENT"
-        ):
-
-            final_answer = (
-                "I could not find sufficient information in "
-                "the JITS Academic Regulations or the official "
-                "JITS website to answer that accurately."
-            )
-
-            handled_by = (
-                "Agent 2 - Website Fallback "
-                "(No sufficient evidence)"
-            )
-
-
-        # -------------------------------------------------
-        # AGENT 2 SUCCESS
-        # -------------------------------------------------
-
-        else:
-
-            final_answer = (
-                website_answer
-            )
-
-            handled_by = (
-                "Agent 2 - Official Website Fallback"
-            )
 
 
     # =====================================================
     # AGENT 1 SUCCESS
     # =====================================================
 
-    else:
+    if not use_agent_2:
 
-        final_answer = (
-            rag_answer
-        )
+        final_answer = rag_answer
 
         handled_by = (
             "Agent 1 - Hybrid RAG "
             "(FAISS + BM25 + Self-RAG)"
         )
 
+        status = "success"
+
 
     # =====================================================
-    # FINAL ANSWER SANITY CHECK
+    # AGENT 2 FALLBACK
     # =====================================================
 
-    if (
-        final_answer is None
-        or not str(final_answer).strip()
-    ):
+    else:
 
-        final_answer = (
-            "I couldn't generate a reliable answer for "
-            "that question. Please try again."
-        )
-
-        handled_by = (
-            handled_by
-            + " | Empty Response Protection"
+        logger.info(
+            "Routing to Agent 2 | reason=%s",
+            fallback_reason
         )
 
 
-    final_answer = str(
-        final_answer
-    ).strip()
+        try:
+
+            website_answer = run_website_agent(
+                question
+            )
+
+            if website_answer is None:
+
+                raise ValueError(
+                    "Agent 2 returned None."
+                )
+
+            website_answer = (
+                website_answer.strip()
+            )
+
+            if not website_answer:
+
+                raise ValueError(
+                    "Agent 2 returned an empty answer."
+                )
+
+
+        except Exception as error:
+
+            log_backend_error(
+                "agent_2",
+                error
+            )
+
+            final_answer = (
+                SYSTEM_ERROR_MESSAGE
+            )
+
+            handled_by = (
+                "Agent 2 - Website Fallback "
+                "(Technical Failure)"
+            )
+
+            status = "error"
+
+
+        else:
+
+            website_upper = (
+                website_answer.upper()
+            )
+
+
+            # ---------------------------------------------
+            # NO SUFFICIENT WEBSITE EVIDENCE
+            # ---------------------------------------------
+
+            if (
+                website_upper
+                == WEBSITE_NOT_SUFFICIENT
+                or website_upper
+                == "WEBSITE_SEARCH_NO_RESULTS"
+                or website_upper.startswith(
+                    "SERPER_ERROR"
+                )
+            ):
+
+                final_answer = (
+                    NO_INFORMATION_MESSAGE
+                )
+
+                handled_by = (
+                    "Agent 2 - Website Fallback "
+                    "(No Sufficient Evidence)"
+                )
+
+                status = "no_answer"
+
+
+            # ---------------------------------------------
+            # AGENT 2 SUCCESS
+            # ---------------------------------------------
+
+            else:
+
+                final_answer = (
+                    website_answer
+                )
+
+                handled_by = (
+                    "Agent 2 - Official Website Fallback"
+                )
+
+                status = "success"
 
 
     # =====================================================
     # OUTPUT GUARDRAIL
     # =====================================================
 
-    output_allowed, output_reason = (
-        safe_validate_output(
-            final_answer
+    try:
+
+        output_allowed, output_reason = (
+            validate_agent_answer(
+                final_answer
+            )
         )
-    )
 
+    except Exception as error:
 
-    if not output_allowed:
-
-        system_logger.warning(
-            "Final response blocked by output guardrail."
+        log_backend_error(
+            "output_guardrail",
+            error
         )
 
         final_answer = (
-            "I could not provide a reliable answer "
-            "for that question. Please try rephrasing it."
+            BLOCKED_OUTPUT_MESSAGE
         )
 
-        handled_by = (
-            handled_by
-            + " | Output Guardrail"
+        handled_by += (
+            " | Output Guardrail Error"
         )
+
+        status = "error"
+
+
+    else:
+
+        if not output_allowed:
+
+            logger.warning(
+                "Output blocked | reason=%s",
+                output_reason
+            )
+
+            final_answer = (
+                BLOCKED_OUTPUT_MESSAGE
+            )
+
+            handled_by += (
+                " | Output Guardrail"
+            )
+
+            status = "blocked"
 
 
     # =====================================================
     # AGENT 3 LOGGING
     # =====================================================
 
-    log_result = safe_log_interaction(
+    log_result = None
+
+
+    try:
+
+        log_result = run_logger_agent(
+
+            customer_name=customer_name,
+
+            question=original_question,
+
+            answer=final_answer,
+
+            handled_by=handled_by
+        )
+
+
+    except Exception as error:
+
+        # Logging failure must NEVER change the student answer.
+
+        log_backend_error(
+            "agent_3_logging",
+            error
+        )
+
+        log_result = (
+            "Logging unavailable."
+        )
+
+
+    # =====================================================
+    # RETURN
+    # =====================================================
+
+    return build_result(
 
         customer_name=customer_name,
 
         question=original_question,
 
+        standalone_question=question,
+
         answer=final_answer,
 
-        handled_by=handled_by
+        handled_by=handled_by,
+
+        status=status,
+
+        log_result=log_result
     )
 
 
-    # =====================================================
-    # FINAL RESULT
-    # =====================================================
-
-    return {
-
-        "customer_name":
-            customer_name,
-
-        "question":
-            original_question,
-
-        "standalone_question":
-            question,
-
-        "answer":
-            final_answer,
-
-        "handled_by":
-            handled_by,
-
-        "log":
-            log_result,
-
-        "status":
-            "success"
-    }
-
-
 # =========================================================
-# TERMINAL CONVERSATIONAL CHAT
+# TERMINAL CHAT
 # =========================================================
 
 def start_chat():
@@ -632,12 +548,9 @@ def start_chat():
     print("=" * 60)
 
     print(
-        "\nHello! I am the JITS AI Student Support Assistant."
-    )
-
-    print(
-        "You can ask about academic regulations, attendance, "
-        "courses, examinations, and other JITS information."
+        "\nAsk about JITS academic regulations, "
+        "attendance, examinations, courses, "
+        "and student information."
     )
 
     print(
@@ -673,10 +586,10 @@ def start_chat():
 
 
     # =====================================================
-    # SESSION HISTORY
+    # CONVERSATION HISTORY
     # =====================================================
 
-    conversation_history = []
+    history = []
 
 
     print(
@@ -697,28 +610,20 @@ def start_chat():
                 "\nYou: "
             ).strip()
 
-
-        except KeyboardInterrupt:
-
-            print(
-                "\n\nAssistant: Session ended. "
-                "Have a great day!"
-            )
-
-            break
-
-
-        except EOFError:
+        except (
+            KeyboardInterrupt,
+            EOFError
+        ):
 
             print(
-                "\nAssistant: Session ended."
+                "\n\nAssistant: Session ended."
             )
 
             break
 
 
         # -------------------------------------------------
-        # EMPTY INPUT
+        # EMPTY
         # -------------------------------------------------
 
         if not user_question:
@@ -742,48 +647,43 @@ def start_chat():
         }:
 
             print(
-                f"\nAssistant: Thank you, {student_name}. "
-                "Have a great day!"
+                f"\nAssistant: Thank you, "
+                f"{student_name}. Have a great day!"
             )
 
             break
 
 
         # =================================================
-        # INPUT GUARDRAIL
-        # =================================================
-
-        allowed, reason = safe_validate_input(
-            user_question
-        )
-
-
-        if not allowed:
-
-            print(
-                "\nAssistant: I can help with JITS-related "
-                "student questions. Please rephrase your request."
-            )
-
-            continue
-
-
-        # =================================================
         # CONVERSATION CONTEXT
         # =================================================
 
-        standalone_question = (
-            safe_contextualize_question(
+        try:
 
-                question=user_question,
+            standalone_question = (
+                contextualize_question(
 
-                conversation_history=conversation_history
+                    question=user_question,
+
+                    conversation_history=history
+                )
             )
-        )
+
+        except Exception as error:
+
+            log_backend_error(
+                "conversation_manager",
+                error
+            )
+
+            # Context failure should not end the conversation.
+            standalone_question = (
+                user_question
+            )
 
 
         # =================================================
-        # RUN SUPPORT
+        # SUPPORT WORKFLOW
         # =================================================
 
         try:
@@ -797,24 +697,22 @@ def start_chat():
                 original_question=user_question
             )
 
-
-            final_answer = result.get(
-                "answer",
-                "I could not generate a reliable answer."
+            final_answer = (
+                result["answer"]
             )
 
 
         except Exception as error:
 
-            # Absolute final safety net
-            log_system_error(
-                "main_workflow",
+            # Absolute last-resort application protection.
+
+            log_backend_error(
+                "main_controller",
                 error
             )
 
             final_answer = (
-                "I encountered a temporary problem while "
-                "processing your question. Please try again."
+                SYSTEM_ERROR_MESSAGE
             )
 
 
@@ -828,18 +726,17 @@ def start_chat():
 
 
         # =================================================
-        # UPDATE MEMORY
+        # MEMORY
         # =================================================
 
-        conversation_history.append(
+        history.append(
             {
                 "role": "user",
                 "content": user_question
             }
         )
 
-
-        conversation_history.append(
+        history.append(
             {
                 "role": "assistant",
                 "content": final_answer
@@ -847,33 +744,15 @@ def start_chat():
         )
 
 
-        if len(
-            conversation_history
-        ) > 12:
+        if len(history) > 12:
 
-            conversation_history = (
-                conversation_history[-12:]
-            )
+            history = history[-12:]
 
 
 # =========================================================
-# APPLICATION ENTRY POINT
+# ENTRY POINT
 # =========================================================
 
 if __name__ == "__main__":
 
-    try:
-
-        start_chat()
-
-    except Exception as error:
-
-        log_system_error(
-            "application_entry_point",
-            error
-        )
-
-        print(
-            "\nThe student support system encountered an "
-            "unexpected problem. Please try again."
-        )
+    start_chat()
