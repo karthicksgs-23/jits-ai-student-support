@@ -22,7 +22,8 @@
     "question": "What happens if attendance is below 65%?",
     "expected_route": "agent_1",
     "expected_keywords": [
-      "cannot be condoned",
+      "below 65%",
+      "not condoned",
       "semester-end",
       "detained"
     ]
